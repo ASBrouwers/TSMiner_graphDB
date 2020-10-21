@@ -16,36 +16,66 @@ def reset(tx):
     # Remove nodes & relationships created by TS query
     q_reset = ["MATCH ()-[r:DF_LI]->() DELETE r",
                "MATCH ()-[r:E_LI]->() DELETE r",
-               "MATCH (l:List) DELETE l"]
+               "MATCH (l:Abs) DELETE l"]
 
     for q in q_reset:
+        print(q)
         tx.run(q)
 
 
-def create_class_df(tx):
-    q_classes = f""" 
-    // EVENT TO LIST:
-    MATCH (e:Event)
-    MATCH path=(e_first:Event) -[:DF*1..{k - 1}]-> (e)
-    WHERE (NOT ()-[:DF]->(e_first)) OR size(relationships(path)) = {k - 1}
-    UNWIND nodes(path) as n
-    WITH collect(n.Activity) AS events, path, e 
-    WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
-    MERGE ( l:List {{ Name:e.Activity, Type:"Activity_3_List", ListID: listName, Events: events}})
-    CREATE (e) -[ecl:E_LI]-> (l)
-    """
+def create_list_df(tx):
+    q_classes = """ 
+        // EVENT TO LIST:
+        MATCH (e:Event)
+        MATCH path=(e_first:Event) -[:DF*]-> (e)
+        // Check path length here so we can use parameter
+        WHERE length(path) >= 1 AND length(path)  <= $k-1  AND ((NOT ()-[:DF]->(e_first)) OR size(relationships(path)) = $k-1)
+        UNWIND nodes(path) as n
+        WITH collect(n.Activity) AS events, path, e 
+        WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
+        MERGE ( l:Abs { Name:e.Activity, Type:"Activity_Past_" + $k + "_List", AbsID: listName, Events: events})
+        CREATE (e) -[ecl:E_LI]-> (l)
+        """
 
     q_link_df = """
-    // Push DF from event to list:
-    MATCH (e1:Event) -[:DF]-> (e2:Event), (e1) -[:E_LI]-> (l1), (e2) -[:E_LI]-> (l2)
-    MERGE (l1) -[df:DF_LI {Activity: e2.Activity}]-> (l2)
-    RETURN l1, df, l2;
-    """
+        // Push DF from event to list:
+        MATCH (e1:Event) -[:DF]-> (e2:Event), (e1) -[:E_LI]-> (l1), (e2) -[:E_LI]-> (l2)
+        MERGE (l1) -[df:DF_LI {Activity: e2.Activity}]-> (l2)
+        RETURN l1, df, l2
+        """
 
     print(q_classes)
-    tx.run(q_classes)
+    tx.run(q_classes, k=k)
     print(q_link_df)
-    return tx.run(q_link_df)
+    return tx.run(q_link_df, t=f"List-{k}")
+
+
+def create_set_df(tx):
+    q_classes = """ 
+        // EVENT TO SET:
+        MATCH path=(e_first:Event) -[:DF*]-> (e)
+        // Check path length here so we can use parameter
+        WHERE length(path) >= 1 
+        UNWIND nodes(path) as n
+        WITH n, path, e, e_first ORDER BY n.Activity
+        WITH collect(distinct n.Activity) AS events, path, e, e_first
+        WHERE size(events) <= $k AND ((NOT ()-[:DF]->(e_first)) OR size(events) = $k)
+        WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
+        MERGE ( l:Abs { Name:events[0], Type:"Activity_Past_" + $k + "_Set", AbsID: listName, Events: events})
+        CREATE (e) -[ecl:E_LI]-> (l)
+        """
+
+    q_link_df = """
+        // Push DF from event to list:
+        MATCH (e1:Event) -[:DF]-> (e2:Event), (e1) -[:E_LI]-> (l1), (e2) -[:E_LI]-> (l2)
+        MERGE (l1) -[df:DF_LI {Activity: e2.Activity}]-> (l2)
+        RETURN l1, df, l2
+        """
+
+    print(q_classes)
+    tx.run(q_classes, k=k)
+    print(q_link_df)
+    return tx.run(q_link_df, t=f"List-{k}")
 
 
 def get_node_label_event(name):
@@ -54,7 +84,7 @@ def get_node_label_event(name):
 
 def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fontcolor):
     q = f'''
-        MATCH (l1:List) -[df:DF_LI]- ()
+        MATCH (l1:Abs) -[df:DF_LI]- ()
         return distinct l1
         '''
     print(q)
@@ -71,8 +101,8 @@ def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fon
             c_entity.node(l1_id, l1_name, color=color, style="filled", fillcolor=color, fontcolor=fontcolor)
 
     q = f'''
-        MATCH (l1:List)
-        WHERE NOT (:List)-[:DF_LI]->(l1)
+        MATCH (l1:Abs)
+        WHERE NOT (:Abs)-[:DF_LI]->(l1)
         return distinct l1
         '''
     print(q)
@@ -88,7 +118,7 @@ def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fon
 
 def get_dfc_edges(tx, dot, edge_color):
     q = f'''
-        MATCH (l1:List) -[df:DF_LI]-> (l2:List)
+        MATCH (l1:Abs) -[df:DF_LI]-> (l2:Abs)
         return distinct l1,df,l2
         '''
     print(q)
@@ -104,6 +134,7 @@ def get_dfc_edges(tx, dot, edge_color):
 
         dot.edge(l1_id, l2_id, xlabel=xlabel, fontcolor=edge_color, color=edge_color, penwidth=str(penwidth))
 
+
 driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "1234"))
 
 print("Input k:")
@@ -114,13 +145,13 @@ dot.attr("graph", rankdir="LR", margin="0", compound="true")
 
 with driver.session() as session:
     session.write_transaction(reset)
-    result = session.write_transaction(create_class_df)
+    result = session.write_transaction(create_set_df)
     session.read_transaction(get_dfc_nodes, dot, "A_", "Application", 0, c5_dark_blue, c_white)
     session.read_transaction(get_dfc_nodes, dot, "W_", "Workflow", 1, c5_medium_blue, c_black)
     session.read_transaction(get_dfc_nodes, dot, "O_", "Offer", 2, c5_orange, c_black)
     session.read_transaction(get_dfc_edges, dot, "#555555")
 
 print(dot.source)
-file = open(f"ts_list_{k}.dot", "w")
+file = open(f"ts_set_{k}.dot", "w")
 file.write(dot.source)
 file.close()
