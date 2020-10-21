@@ -16,7 +16,7 @@ def reset(tx):
     # Remove nodes & relationships created by TS query
     q_reset = ["MATCH ()-[r:DF_LI]->() DELETE r",
                "MATCH ()-[r:E_LI]->() DELETE r",
-               "MATCH (l:Abs) DELETE l"]
+               "MATCH (l:TS_node) DELETE l"]
 
     for q in q_reset:
         print(q)
@@ -27,13 +27,13 @@ def create_list_df(tx):
     q_classes = """ 
         // EVENT TO LIST:
         MATCH (e:Event)
-        MATCH path=(e_first:Event) -[:DF*]-> (e)
+        MATCH path=(e_first:Event) -[:DF*0..]-> (e)
         // Check path length here so we can use parameter
-        WHERE length(path) >= 1 AND length(path)  <= $k-1  AND ((NOT ()-[:DF]->(e_first)) OR size(relationships(path)) = $k-1)
+        WHERE length(path)  <= $k-1  AND ((NOT ()-[:DF]->(e_first)) OR size(relationships(path)) = $k-1)
         UNWIND nodes(path) as n
         WITH collect(n.Activity) AS events, path, e 
         WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
-        MERGE ( l:Abs { Name:e.Activity, Type:"Activity_Past_" + $k + "_List", AbsID: listName, Events: events})
+        MERGE ( l:TS_node { Name:e.Activity, Type:"Activity_Past_" + $k + "_List", TS_nodeID: listName, Events: events})
         CREATE (e) -[ecl:E_LI]-> (l)
         """
 
@@ -53,15 +53,14 @@ def create_list_df(tx):
 def create_set_df(tx):
     q_classes = """ 
         // EVENT TO SET:
-        MATCH path=(e_first:Event) -[:DF*]-> (e)
-        // Check path length here so we can use parameter
-        WHERE length(path) >= 1 
+        MATCH (e:Event)
+        MATCH path=(e_first:Event) -[:DF*0..]-> (e)
         UNWIND nodes(path) as n
         WITH n, path, e, e_first ORDER BY n.Activity
         WITH collect(distinct n.Activity) AS events, path, e, e_first
         WHERE size(events) <= $k AND ((NOT ()-[:DF]->(e_first)) OR size(events) = $k)
         WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
-        MERGE ( l:Abs { Name:events[0], Type:"Activity_Past_" + $k + "_Set", AbsID: listName, Events: events})
+        MERGE ( l:TS_node { Name:events[0], Type:"Activity_Past_" + $k + "_Set", TS_nodeID: listName, Events: events})
         CREATE (e) -[ecl:E_LI]-> (l)
         """
 
@@ -84,7 +83,7 @@ def get_node_label_event(name):
 
 def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fontcolor):
     q = f'''
-        MATCH (l1:Abs) -[df:DF_LI]- ()
+        MATCH (l1:TS_node) -[df:DF_LI]- ()
         return distinct l1
         '''
     print(q)
@@ -101,8 +100,8 @@ def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fon
             c_entity.node(l1_id, l1_name, color=color, style="filled", fillcolor=color, fontcolor=fontcolor)
 
     q = f'''
-        MATCH (l1:Abs)
-        WHERE NOT (:Abs)-[:DF_LI]->(l1)
+        MATCH (l1:TS_node)
+        WHERE NOT (:TS_node)-[:DF_LI]->(l1)
         return distinct l1
         '''
     print(q)
@@ -118,7 +117,7 @@ def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fon
 
 def get_dfc_edges(tx, dot, edge_color):
     q = f'''
-        MATCH (l1:Abs) -[df:DF_LI]-> (l2:Abs)
+        MATCH (l1:TS_node) -[df:DF_LI]-> (l2:TS_node)
         return distinct l1,df,l2
         '''
     print(q)
