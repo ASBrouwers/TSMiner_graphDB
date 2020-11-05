@@ -88,15 +88,15 @@ def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fon
         '''
     print(q)
 
-    dot.attr("node", shape="circle", fixedsize="true", width="0.4", height="0.4", fontname="Helvetica", fontsize="8",
-             margin="0")
+    dot.attr("node", shape="ellipse", fixedsize="false", width="0.4", height="0.4", fontname="Helvetica", fontsize="8",
+             margin="0.05")
     c_entity = Digraph(name="cluster" + str(clusternumber))
     c_entity.attr(rankdir="LR", style="invis")
 
     for record in tx.run(q):
         l1_id = str(record["l1"].id)
         if record["l1"]["Name"][0:2] == entity_prefix:
-            l1_name = get_node_label_event(record["l1"]["Name"])
+            l1_name = ", ".join([ev[2:6] for ev in record["l1"]["Events"]])
             c_entity.node(l1_id, l1_name, color=color, style="filled", fillcolor=color, fontcolor=fontcolor)
 
     q = f'''
@@ -144,13 +144,13 @@ dot.attr("graph", rankdir="LR", margin="0", compound="true")
 
 with driver.session() as session:
     session.write_transaction(reset)
-    result = session.write_transaction(create_set_df)
-    session.read_transaction(get_dfc_nodes, dot, "A_", "Application", 0, c5_dark_blue, c_white)
+    result = session.write_transaction(create_list_df)
+    session.read_transaction(get_dfc_nodes, dot, "A_", "Application", 0, c5_yellow, c_black)
     session.read_transaction(get_dfc_nodes, dot, "W_", "Workflow", 1, c5_medium_blue, c_black)
     session.read_transaction(get_dfc_nodes, dot, "O_", "Offer", 2, c5_orange, c_black)
     session.read_transaction(get_dfc_edges, dot, "#555555")
 
 print(dot.source)
-file = open(f"ts_set_{k}.dot", "w")
+file = open(f"ts_list_{k}.dot", "w")
 file.write(dot.source)
 file.close()
