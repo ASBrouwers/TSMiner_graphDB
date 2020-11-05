@@ -135,7 +135,17 @@ def get_dfc_edges(tx, dot, edge_color):
 
 
 driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "1234"))
+types = ['list', 'set']
 
+functions = [create_list_df, create_set_df]
+print("Input abstraction type:\n1: List \n2: Set")
+type = int(input())
+
+
+abstr_name = types[type-1]
+abstr_func = functions[type-1]
+
+print(f"Selected abstraction: {abstr_name}")
 print("Input k:")
 k = int(input())
 
@@ -144,13 +154,13 @@ dot.attr("graph", rankdir="LR", margin="0", compound="true")
 
 with driver.session() as session:
     session.write_transaction(reset)
-    result = session.write_transaction(create_list_df)
+    result = session.write_transaction(abstr_func)
     session.read_transaction(get_dfc_nodes, dot, "A_", "Application", 0, c5_yellow, c_black)
     session.read_transaction(get_dfc_nodes, dot, "W_", "Workflow", 1, c5_medium_blue, c_black)
     session.read_transaction(get_dfc_nodes, dot, "O_", "Offer", 2, c5_orange, c_black)
     session.read_transaction(get_dfc_edges, dot, "#555555")
 
 print(dot.source)
-file = open(f"ts_list_{k}.dot", "w")
+file = open(f"ts_{abstr_name.lower()}_{k}.dot", "w")
 file.write(dot.source)
 file.close()
