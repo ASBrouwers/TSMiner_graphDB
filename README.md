@@ -1,1 +1,1 @@
-ts_gdb_py
+# Transition system miner implementation using Cypher queries
