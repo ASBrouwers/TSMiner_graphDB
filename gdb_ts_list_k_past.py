@@ -1,5 +1,6 @@
 from neo4j import GraphDatabase
 from graphviz import Digraph
+from timeit import default_timer as timer
 
 c_white = "#ffffff"
 c_black = "#000000"
@@ -14,14 +15,40 @@ c5_dark_blue = '#4575b4'
 
 def reset(tx):
     # Remove nodes & relationships created by TS query
-    q_reset = ["MATCH ()-[r:DF_LI]->() DELETE r",
-               "MATCH ()-[r:E_LI]->() DELETE r",
+    q_reset = ["MATCH ()-[r:DF_ABS]->() DELETE r",
+               "MATCH ()-[r:E_ABS]->() DELETE r",
                "MATCH (l:TS_node) DELETE l"]
 
     for q in q_reset:
         print(q)
         tx.run(q)
 
+
+def create_start_nodes(tx):
+	q_start = """
+		MATCH (e:Event)
+		WHERE NOT (() -[:DF]-> (e))
+		MATCH (e) -[:E_ABS]-> (a)
+		WITH substring(e.Activity, 0, 2) + "Start" AS startName, a, e
+		MERGE (st:TS_node {Events: [substring(e.Activity, 0, 2) + "Start"], Name: startName, TS_nodeID: startName, Type: a.Type})
+		MERGE (st) -[d:DF_ABS {Activity: e.Activity}]-> (a)
+	"""
+
+	print(q_start)
+	return tx.run(q_start)
+
+def create_end_nodes(tx):
+	q_end = """
+		MATCH (e:Event)
+		WHERE NOT ((e) -[:DF]-> ())
+		MATCH (e) -[:E_ABS]-> (a)
+		WITH substring(e.Activity, 0, 2) + "End" AS endName, a, e
+		MERGE (ed:TS_node {Events: [substring(e.Activity, 0, 2) + "End"], Name: endName, TS_nodeID: endName, Type: a.Type})
+		MERGE (a) -[d:DF_ABS {Activity: ""}]-> (ed)
+	"""
+
+	print(q_end)
+	return tx.run(q_end)
 
 def create_list_df(tx):
     q_classes = """ 
@@ -34,13 +61,13 @@ def create_list_df(tx):
         WITH collect(n.Activity) AS events, path, e 
         WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
         MERGE ( l:TS_node { Name:e.Activity, Type:"Activity_Past_" + $k + "_List", TS_nodeID: listName, Events: events})
-        CREATE (e) -[ecl:E_LI]-> (l)
+        CREATE (e) -[ecl:E_ABS]-> (l)
         """
 
     q_link_df = """
         // Push DF from event to list:
-        MATCH (e1:Event) -[:DF]-> (e2:Event), (e1) -[:E_LI]-> (l1), (e2) -[:E_LI]-> (l2)
-        MERGE (l1) -[df:DF_LI {Activity: e2.Activity}]-> (l2)
+        MATCH (e1:Event) -[:DF]-> (e2:Event), (e1) -[:E_ABS]-> (l1), (e2) -[:E_ABS]-> (l2)
+        MERGE (l1) -[df:DF_ABS {Activity: e2.Activity}]-> (l2)
         RETURN l1, df, l2
         """
 
@@ -61,13 +88,13 @@ def create_set_df(tx):
         WHERE size(events) <= $k AND ((NOT ()-[:DF]->(e_first)) OR size(events) = $k)
         WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
         MERGE ( l:TS_node { Name:events[0], Type:"Activity_Past_" + $k + "_Set", TS_nodeID: listName, Events: events})
-        CREATE (e) -[ecl:E_LI]-> (l)
+        CREATE (e) -[ecl:E_ABS]-> (l)
         """
 
     q_link_df = """
         // Push DF from event to list:
-        MATCH (e1:Event) -[:DF]-> (e2:Event), (e1) -[:E_LI]-> (l1), (e2) -[:E_LI]-> (l2)
-        MERGE (l1) -[df:DF_LI {Activity: e2.Activity}]-> (l2)
+        MATCH (e1:Event) -[:DF]-> (e2:Event), (e1) -[:E_ABS]-> (l1), (e2) -[:E_ABS]-> (l2)
+        MERGE (l1) -[df:DF_ABS {Activity: e2.Activity}]-> (l2)
         RETURN l1, df, l2
         """
 
@@ -83,7 +110,7 @@ def get_node_label_event(name):
 
 def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fontcolor):
     q = f'''
-        MATCH (l1:TS_node) -[df:DF_LI]- ()
+        MATCH (l1:TS_node) -[df:DF_ABS]- ()
         return distinct l1
         '''
     print(q)
@@ -96,12 +123,12 @@ def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fon
     for record in tx.run(q):
         l1_id = str(record["l1"].id)
         if record["l1"]["Name"][0:2] == entity_prefix:
-            l1_name = ", ".join([ev[2:6] for ev in record["l1"]["Events"]])
+            l1_name = ", ".join([ev[2:7] for ev in record["l1"]["Events"]])
             c_entity.node(l1_id, l1_name, color=color, style="filled", fillcolor=color, fontcolor=fontcolor)
 
     q = f'''
         MATCH (l1:TS_node)
-        WHERE NOT (:TS_node)-[:DF_LI]->(l1)
+        WHERE NOT (:TS_node)-[:DF_ABS]->(l1)
         return distinct l1
         '''
     print(q)
@@ -117,7 +144,7 @@ def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fon
 
 def get_dfc_edges(tx, dot, edge_color):
     q = f'''
-        MATCH (l1:TS_node) -[df:DF_LI]-> (l2:TS_node)
+        MATCH (l1:TS_node) -[df:DF_ABS]-> (l2:TS_node)
         return distinct l1,df,l2
         '''
     print(q)
@@ -152,15 +179,24 @@ k = int(input())
 dot = Digraph(comment='Query Result')
 dot.attr("graph", rankdir="LR", margin="0", compound="true")
 
+start = timer()
+
 with driver.session() as session:
     session.write_transaction(reset)
     result = session.write_transaction(abstr_func)
+    session.write_transaction(create_start_nodes)
+    session.write_transaction(create_end_nodes)
     session.read_transaction(get_dfc_nodes, dot, "A_", "Application", 0, c5_yellow, c_black)
     session.read_transaction(get_dfc_nodes, dot, "W_", "Workflow", 1, c5_medium_blue, c_black)
     session.read_transaction(get_dfc_nodes, dot, "O_", "Offer", 2, c5_orange, c_black)
     session.read_transaction(get_dfc_edges, dot, "#555555")
 
+end = timer()
+
+
 print(dot.source)
+print(f"Execution time: {end-start} seconds")
 file = open(f"ts_{abstr_name.lower()}_{k}.dot", "w")
 file.write(dot.source)
 file.close()
+
