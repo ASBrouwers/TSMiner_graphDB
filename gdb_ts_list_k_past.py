@@ -1,6 +1,9 @@
-from neo4j import GraphDatabase
-from graphviz import Digraph
+import os
+import subprocess
 from timeit import default_timer as timer
+
+from graphviz import Digraph
+from neo4j import GraphDatabase
 
 c_white = "#ffffff"
 c_black = "#000000"
@@ -11,6 +14,9 @@ c5_yellow = '#fee090'
 c5_light_blue = '#e0f3f8'
 c5_medium_blue = '#91bfdb'
 c5_dark_blue = '#4575b4'
+
+CLI = True  # Enable CLI to set parameters
+DOT = True  # Render dot to PDF
 
 
 def reset(tx):
@@ -25,7 +31,7 @@ def reset(tx):
 
 
 def create_start_nodes(tx):
-	q_start = """
+    q_start = """
 		MATCH (e:Event)
 		WHERE NOT (() -[:DF]-> (e))
 		MATCH (e) -[:E_ABS]-> (a)
@@ -34,11 +40,12 @@ def create_start_nodes(tx):
 		MERGE (st) -[d:DF_ABS {Activity: e.Activity}]-> (a)
 	"""
 
-	print(q_start)
-	return tx.run(q_start)
+    print(q_start)
+    return tx.run(q_start)
+
 
 def create_end_nodes(tx):
-	q_end = """
+    q_end = """
 		MATCH (e:Event)
 		WHERE NOT ((e) -[:DF]-> ())
 		MATCH (e) -[:E_ABS]-> (a)
@@ -47,8 +54,9 @@ def create_end_nodes(tx):
 		MERGE (a) -[d:DF_ABS {Activity: ""}]-> (ed)
 	"""
 
-	print(q_end)
-	return tx.run(q_end)
+    print(q_end)
+    return tx.run(q_end)
+
 
 def create_list_df(tx):
     q_classes = """ 
@@ -161,23 +169,28 @@ def get_dfc_edges(tx, dot, edge_color):
         dot.edge(l1_id, l2_id, xlabel=xlabel, fontcolor=edge_color, color=edge_color, penwidth=str(penwidth))
 
 
+def run(cmd):
+    subprocess.run(["powershell", "-Command", cmd])
+
+
 driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "1234"))
 types = ['list', 'set']
 
 functions = [create_list_df, create_set_df]
-print("Input abstraction type:\n1: List \n2: Set")
-type = int(input())
+if CLI:
+    type = int(input("Input abstraction type:\n1: List \n2: Set\n"))
+    k = int(input("Input k:\n"))
+else:
+    type = 1
+    k = 3
 
-
-abstr_name = types[type-1]
-abstr_func = functions[type-1]
-
+abstr_name = types[type - 1]
+abstr_func = functions[type - 1]
 print(f"Selected abstraction: {abstr_name}")
-print("Input k:")
-k = int(input())
 
+print(f"k: {k}")
 dot = Digraph(comment='Query Result')
-dot.attr("graph", rankdir="LR", margin="0", compound="true")
+dot.attr("graph", rankdir="TB", margin="0", compound="true")
 
 start = timer()
 
@@ -193,10 +206,15 @@ with driver.session() as session:
 
 end = timer()
 
-
 print(dot.source)
-print(f"Execution time: {end-start} seconds")
-file = open(f"ts_{abstr_name.lower()}_{k}.dot", "w")
-file.write(dot.source)
-file.close()
+print(f"Execution time: {end - start} seconds")
+filename_dot = f"./out/ts_{abstr_name.lower()}_{k}.dot"
+os.makedirs(os.path.dirname(filename_dot), exist_ok=True)
 
+with open(filename_dot, "w") as file:
+    file.write(dot.source)
+
+if DOT:
+    if os.path.exists(f"./out/ts_{abstr_name.lower()}_{k}.dot"):
+        run(
+            f"cd .\\out; ccomps -x .\\ts_{abstr_name.lower()}_{k}.dot | dot -Tpng -O; mv noname.gv.png {abstr_name.lower()}_{k}_A.png; mv noname.gv.2.png {abstr_name.lower()}_{k}_W.png; mv noname.gv.3.png {abstr_name.lower()}_{k}_O.png")
