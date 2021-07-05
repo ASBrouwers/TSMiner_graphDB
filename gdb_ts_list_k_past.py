@@ -15,7 +15,7 @@ c5_light_blue = '#e0f3f8'
 c5_medium_blue = '#91bfdb'
 c5_dark_blue = '#4575b4'
 
-CLI = True  # Enable CLI to set parameters
+CLI = False  # Enable CLI to set parameters
 DOT = True  # Render dot to PDF
 
 
@@ -90,12 +90,13 @@ def create_set_df(tx):
         // EVENT TO SET:
         MATCH (e:Event)
         MATCH path=(e_first:Event) -[:DF*0..]-> (e)
-        UNWIND nodes(path) as n
-        WITH n, path, e, e_first ORDER BY n.Activity
-        WITH collect(distinct n.Activity) AS events, path, e, e_first
-        WHERE size(events) <= $k AND ((NOT ()-[:DF]->(e_first)) OR size(events) = $k)
+        // Check path length here so we can use parameter
+        WHERE length(path)  <= $k-1  AND ((NOT ()-[:DF]->(e_first)) OR size(relationships(path)) = $k-1)
+        UNWIND nodes(path) as n 
+        WITH e, path, n ORDER BY n.Activity
+        WITH collect(DISTINCT n.Activity) AS events, path, e 
         WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
-        MERGE ( l:TS_node { Name:events[0], Type:"Activity_Past_" + $k + "_Set", TS_nodeID: listName, Events: events})
+        MERGE ( l:TS_node { Name:listName, Type:"Activity_Past_" + $k + "_Set", TS_nodeID: listName, Events: events})
         CREATE (e) -[ecl:E_ABS]-> (l)
         """
 
@@ -168,7 +169,6 @@ def get_dfc_edges(tx, dot, edge_color):
 
         dot.edge(l1_id, l2_id, xlabel=xlabel, fontcolor=edge_color, color=edge_color, penwidth=str(penwidth))
 
-
 def run(cmd):
     subprocess.run(["powershell", "-Command", cmd])
 
@@ -178,43 +178,50 @@ types = ['list', 'set']
 
 functions = [create_list_df, create_set_df]
 if CLI:
-    type = int(input("Input abstraction type:\n1: List \n2: Set\n"))
-    k = int(input("Input k:\n"))
+    abstrs = [int(input("Input abstraction type:\n1: List \n2: Set\n"))]
+    ks = [int(input("Input k:\n"))]
 else:
-    type = 1
-    k = 3
+    abstrs = [1, 2]
+    ks = [3]
 
-abstr_name = types[type - 1]
-abstr_func = functions[type - 1]
-print(f"Selected abstraction: {abstr_name}")
+r=-1
 
-print(f"k: {k}")
-dot = Digraph(comment='Query Result')
-dot.attr("graph", rankdir="TB", margin="0", compound="true")
+for abstr in abstrs:
+    abstr_name = types[abstr - 1]
+    abstr_func = functions[abstr - 1]
 
-start = timer()
+    for k in ks:
+        print(f"abs: {abstr_name}, k: {k}")
+        dot = Digraph(comment='Query Result')
+        dot.attr("graph", rankdir="TB", margin="0", compound="true")
 
-with driver.session() as session:
-    session.write_transaction(reset)
-    result = session.write_transaction(abstr_func)
-    session.write_transaction(create_start_nodes)
-    session.write_transaction(create_end_nodes)
-    session.read_transaction(get_dfc_nodes, dot, "A_", "Application", 0, c5_yellow, c_black)
-    session.read_transaction(get_dfc_nodes, dot, "W_", "Workflow", 1, c5_medium_blue, c_black)
-    session.read_transaction(get_dfc_nodes, dot, "O_", "Offer", 2, c5_orange, c_black)
-    session.read_transaction(get_dfc_edges, dot, "#555555")
+        start = timer()
 
-end = timer()
+        with driver.session() as session:
+            session.write_transaction(reset)
+            result = session.write_transaction(abstr_func)
+            session.write_transaction(create_start_nodes)
+            session.write_transaction(create_end_nodes)
+            session.read_transaction(get_dfc_nodes, dot, "A_", "Application", 0, c5_yellow, c_black)
+            session.read_transaction(get_dfc_nodes, dot, "W_", "Workflow", 1, c5_medium_blue, c_black)
+            session.read_transaction(get_dfc_nodes, dot, "O_", "Offer", 2, c5_orange, c_black)
+            session.read_transaction(get_dfc_edges, dot, "#555555")
 
-print(dot.source)
-print(f"Execution time: {end - start} seconds")
-filename_dot = f"./out/ts_{abstr_name.lower()}_{k}.dot"
-os.makedirs(os.path.dirname(filename_dot), exist_ok=True)
+        end = timer()
 
-with open(filename_dot, "w") as file:
-    file.write(dot.source)
+        # print(dot.source)
+        print(f"Execution time: {end - start} seconds")
+        filename_dot = f"./{abstr_name}{k}/{r}/ts_{abstr_name.lower()}_{k}.dot"
+        filename_time = f"./{abstr_name}{k}/{r}/ts_{abstr_name.lower()}_{k}_time.txt"
+        os.makedirs(os.path.dirname(filename_dot), exist_ok=True)
+        os.makedirs(os.path.dirname(filename_time), exist_ok=True)
 
-if DOT:
-    if os.path.exists(f"./out/ts_{abstr_name.lower()}_{k}.dot"):
-        run(
-            f"cd .\\out; ccomps -x .\\ts_{abstr_name.lower()}_{k}.dot | dot -Tpng -O; mv noname.gv.png {abstr_name.lower()}_{k}_A.png; mv noname.gv.2.png {abstr_name.lower()}_{k}_W.png; mv noname.gv.3.png {abstr_name.lower()}_{k}_O.png")
+        with open(filename_dot, "w") as file:
+            file.write(dot.source)
+
+        with open(filename_time, "w") as file:
+            file.write(f"{end - start} seconds")
+
+        if DOT:
+            # if os.path.exists(f"./{abstr_name.lower()}{k}/-1/ts_{abstr_name.lower()}_{k}.dot"):
+            run(f"cd .\\out; rm {abstr_name}_{k}*.png; ccomps -x ..\\{abstr_name}{k}\\-1\\ts_{abstr_name}_{k}.dot | dot -Grankdir=TB -Tpng -O; mv noname.gv.png {abstr_name}_{k}_A.png; mv noname.gv.2.png {abstr_name}_{k}_W.png; mv noname.gv.3.png {abstr_name}_{k}_O.png")
