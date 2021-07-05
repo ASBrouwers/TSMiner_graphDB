@@ -36,7 +36,7 @@ def create_start_nodes(tx):
 		WHERE NOT (() -[:DF]-> (e))
 		MATCH (e) -[:E_ABS]-> (a)
 		WITH substring(e.Activity, 0, 2) + "Start" AS startName, a, e
-		MERGE (st:TS_node {Events: [substring(e.Activity, 0, 2) + "Start"], Name: startName, TS_nodeID: startName, Type: a.Type})
+		MERGE (st:TS_node {Activities: [substring(e.Activity, 0, 2) + "Start"], Name: startName, TS_nodeID: startName, Type: a.Type})
 		MERGE (st) -[d:DF_ABS {Activity: e.Activity}]-> (a)
 	"""
 
@@ -50,7 +50,7 @@ def create_end_nodes(tx):
 		WHERE NOT ((e) -[:DF]-> ())
 		MATCH (e) -[:E_ABS]-> (a)
 		WITH substring(e.Activity, 0, 2) + "End" AS endName, a, e
-		MERGE (ed:TS_node {Events: [substring(e.Activity, 0, 2) + "End"], Name: endName, TS_nodeID: endName, Type: a.Type})
+		MERGE (ed:TS_node {Activities: [substring(e.Activity, 0, 2) + "End"], Name: endName, TS_nodeID: endName, Type: a.Type})
 		MERGE (a) -[d:DF_ABS {Activity: ""}]-> (ed)
 	"""
 
@@ -66,9 +66,9 @@ def create_list_df(tx):
         // Check path length here so we can use parameter
         WHERE length(path)  <= $k-1  AND ((NOT ()-[:DF]->(e_first)) OR size(relationships(path)) = $k-1)
         UNWIND nodes(path) as n
-        WITH collect(n.Activity) AS events, path, e 
-        WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
-        MERGE ( l:TS_node { Name:e.Activity, Type:"Activity_Past_" + $k + "_List", TS_nodeID: listName, Events: events})
+        WITH collect(n.Activity) AS activities, path, e 
+        WITH path, REDUCE(s = HEAD(activities), n IN TAIL(activities) | s + '-' + n) AS listName, e, activities
+        MERGE ( l:TS_node { Name:e.Activity, Type:"Activity_Past_" + $k + "_List", TS_nodeID: listName, Activities: activities})
         CREATE (e) -[ecl:E_ABS]-> (l)
         """
 
@@ -94,9 +94,9 @@ def create_set_df(tx):
         WHERE length(path)  <= $k-1  AND ((NOT ()-[:DF]->(e_first)) OR size(relationships(path)) = $k-1)
         UNWIND nodes(path) as n 
         WITH e, path, n ORDER BY n.Activity
-        WITH collect(DISTINCT n.Activity) AS events, path, e 
-        WITH path, REDUCE(s = HEAD(events), n IN TAIL(events) | s + '-' + n) AS listName, e, events
-        MERGE ( l:TS_node { Name:listName, Type:"Activity_Past_" + $k + "_Set", TS_nodeID: listName, Events: events})
+        WITH collect(DISTINCT n.Activity) AS activities, path, e 
+        WITH path, REDUCE(s = HEAD(activities), n IN TAIL(activities) | s + '-' + n) AS listName, e, activities
+        MERGE ( l:TS_node { Name:listName, Type:"Activity_Past_" + $k + "_Set", TS_nodeID: listName, Activities: activities})
         CREATE (e) -[ecl:E_ABS]-> (l)
         """
 
@@ -132,7 +132,7 @@ def get_dfc_nodes(tx, dot, entity_prefix, entity_name, clusternumber, color, fon
     for record in tx.run(q):
         l1_id = str(record["l1"].id)
         if record["l1"]["Name"][0:2] == entity_prefix:
-            l1_name = ", ".join([ev[2:7] for ev in record["l1"]["Events"]])
+            l1_name = ", ".join([ev[2:7] for ev in record["l1"]["Activities"]])
             c_entity.node(l1_id, l1_name, color=color, style="filled", fillcolor=color, fontcolor=fontcolor)
 
     q = f'''
@@ -178,13 +178,14 @@ types = ['list', 'set']
 
 functions = [create_list_df, create_set_df]
 if CLI:
+    r = input("Input ratio folder name")
     abstrs = [int(input("Input abstraction type:\n1: List \n2: Set\n"))]
     ks = [int(input("Input k:\n"))]
 else:
+    r = input("Input ratio folder name")
     abstrs = [1, 2]
     ks = [3]
 
-r=-1
 
 for abstr in abstrs:
     abstr_name = types[abstr - 1]
@@ -224,4 +225,4 @@ for abstr in abstrs:
 
         if DOT:
             # if os.path.exists(f"./{abstr_name.lower()}{k}/-1/ts_{abstr_name.lower()}_{k}.dot"):
-            run(f"cd .\\out; rm {abstr_name}_{k}*.png; ccomps -x ..\\{abstr_name}{k}\\-1\\ts_{abstr_name}_{k}.dot | dot -Grankdir=TB -Tpng -O; mv noname.gv.png {abstr_name}_{k}_A.png; mv noname.gv.2.png {abstr_name}_{k}_W.png; mv noname.gv.3.png {abstr_name}_{k}_O.png")
+            run(f"cd .\\{abstr_name}{k}\\{r}; rm {abstr_name}_{k}*.png; ccomps -x .\\ts_{abstr_name}_{k}.dot | dot -Grankdir=TB -Tpng -O; mv noname.gv.png {abstr_name}_{k}_A.png; mv noname.gv.2.png {abstr_name}_{k}_W.png; mv noname.gv.3.png {abstr_name}_{k}_O.png")
