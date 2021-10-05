@@ -250,3 +250,5 @@ dmypy.json
 *.png
 *.pdf
 *.txt
+
+.idea/

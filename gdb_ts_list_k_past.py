@@ -5,6 +5,18 @@ from timeit import default_timer as timer
 from graphviz import Digraph
 from neo4j import GraphDatabase
 
+# SETTINGS -------------------------------------
+neo4j_address = "bolt://localhost:7687"
+username = "neo4j"
+password = "1234"
+CLI = True  # Enable CLI to set parameters, else use below values
+abstrs = [1, 2]  # Abstractions to use if CLI == false: 1 = List, 2 = Set
+ks = [3]  # ks to use if CLI == false
+
+DOT = True  # Render dot to PNG
+
+# END SETTINGS ---------------------------------
+
 c_white = "#ffffff"
 c_black = "#000000"
 
@@ -14,10 +26,6 @@ c5_yellow = '#fee090'
 c5_light_blue = '#e0f3f8'
 c5_medium_blue = '#91bfdb'
 c5_dark_blue = '#4575b4'
-
-CLI = False  # Enable CLI to set parameters
-DOT = True  # Render dot to PDF
-
 
 def reset(tx):
     # Remove nodes & relationships created by TS query
@@ -31,28 +39,29 @@ def reset(tx):
 
 
 def create_start_nodes(tx):
-    q_start = """
+	q_start = """
 		MATCH (e:Event)
 		WHERE NOT (() -[:DF]-> (e))
+		MATCH (e) -[:E_EN]-> (en:Entity)
+		WITH e, en.EntityType AS entityType
 		MATCH (e) -[:E_ABS]-> (a)
-		WITH substring(e.Activity, 0, 2) + "Start" AS startName, a, e
-		MERGE (st:TS_node {Activities: [substring(e.Activity, 0, 2) + "Start"], Name: startName, TS_nodeID: startName, Type: a.Type})
+		MERGE (st:TS_node {Events: ["Start"], Name: "Start", TS_nodeID: "Start", Type: a.Type, EntityType: entityType})
 		MERGE (st) -[d:DF_ABS {Activity: e.Activity}]-> (a)
 	"""
 
-    print(q_start)
-    return tx.run(q_start)
-
+	print(q_start)
+	return tx.run(q_start)
 
 def create_end_nodes(tx):
     q_end = """
-		MATCH (e:Event)
-		WHERE NOT ((e) -[:DF]-> ())
-		MATCH (e) -[:E_ABS]-> (a)
-		WITH substring(e.Activity, 0, 2) + "End" AS endName, a, e
-		MERGE (ed:TS_node {Activities: [substring(e.Activity, 0, 2) + "End"], Name: endName, TS_nodeID: endName, Type: a.Type})
-		MERGE (a) -[d:DF_ABS {Activity: ""}]-> (ed)
-	"""
+        MATCH (e:Event)
+        WHERE NOT ((e) -[:DF]-> ())
+        MATCH (e) -[:E_EN]-> (en:Entity)
+        WITH e, en.EntityType AS entityType
+        MATCH (e) -[:E_ABS]-> (a)
+        MERGE (ed:TS_node {Events: ["End"], Name: "End", TS_nodeID: "End", Type: a.Type, EntityType: entityType})
+        MERGE (a) -[d:DF_ABS {Activity: ""}]-> (ed)
+    """
 
     print(q_end)
     return tx.run(q_end)
@@ -173,18 +182,16 @@ def run(cmd):
     subprocess.run(["powershell", "-Command", cmd])
 
 
-driver = GraphDatabase.driver("bolt://localhost:7687", auth=("neo4j", "1234"))
+driver = GraphDatabase.driver(neo4j_address, auth=(username, password))
 types = ['list', 'set']
 
 functions = [create_list_df, create_set_df]
 if CLI:
-    r = input("Input ratio folder name")
+    r = input("Input subfolder name")
     abstrs = [int(input("Input abstraction type:\n1: List \n2: Set\n"))]
     ks = [int(input("Input k:\n"))]
 else:
-    r = input("Input ratio folder name")
-    abstrs = [1, 2]
-    ks = [3]
+    r = input("Input subfolder name")
 
 
 for abstr in abstrs:
@@ -224,5 +231,4 @@ for abstr in abstrs:
             file.write(f"{end - start} seconds")
 
         if DOT:
-            # if os.path.exists(f"./{abstr_name.lower()}{k}/-1/ts_{abstr_name.lower()}_{k}.dot"):
             run(f"cd .\\{abstr_name}{k}\\{r}; rm {abstr_name}_{k}*.png; ccomps -x .\\ts_{abstr_name}_{k}.dot | dot -Grankdir=TB -Tpng -O; mv noname.gv.png {abstr_name}_{k}_A.png; mv noname.gv.2.png {abstr_name}_{k}_W.png; mv noname.gv.3.png {abstr_name}_{k}_O.png")
